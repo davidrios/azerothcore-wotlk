@@ -18,6 +18,7 @@ INSERT INTO `command` (`name`, `security`, `help`) VALUES
 ('finditem', 0,
     'Syntax: .finditem #words [filters]\r\n'
     'Search items whose name contains all the words, in any order. Best matches come first.\r\n'
+    'Use up to 5 words of at least 2 letters.\r\n'
     'Filters:\r\n'
     '  q:#quality  at least this quality: poor, common, uncommon, rare, epic, legendary, heirloom\r\n'
     '  slot:#slot  head, neck, shoulder, back, chest, wrist, hands, waist, legs, feet, ring, trinket,\r\n'

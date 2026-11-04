@@ -31,9 +31,14 @@
  *   - every distinct word of the names, with the items containing it;
  *   - every suffix of those words, sorted, so a binary search finds all words
  *     containing a query word.
- * A search touches only the matching words and items, so it needs no rate
- * limit. The file carries a fingerprint of the item data it was built from:
- * on startup it is reused when the items are unchanged and rebuilt otherwise.
+ * A query is limited to MAX_QUERY_WORDS distinct words of at least
+ * MIN_WORD_LENGTH characters; only the longest one goes through the index and
+ * the rest are checked on its candidates, so a search costs one index lookup
+ * plus work proportional to its matches. Like the other wowVR commands it is
+ * also subject to the per-account cooldown in cs_wowvr.cpp.
+ *
+ * The file carries a fingerprint of the item data it was built from: on
+ * startup it is reused when the items are unchanged and rebuilt otherwise.
  * Directory: WowVR.FindItem.CacheDir in worldserver.conf (default:
  * <DataDir>/wowvr-finditem-cache). It must be owned by the server user and not
  * writable by group or others, and index files must be regular files owned by
@@ -62,7 +67,6 @@
 #include <cwctype>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <memory>
 #include <mutex>
 #include <unordered_map>
@@ -78,6 +82,8 @@ using namespace Acore::ChatCommands;
 namespace
 {
     constexpr std::size_t RESULTS_PER_PAGE = 25;
+    constexpr std::size_t MAX_QUERY_WORDS = 5;
+    constexpr std::size_t MIN_WORD_LENGTH = 2; // characters, not bytes
 
     struct NamedValue
     {
@@ -621,9 +627,14 @@ namespace
 
     // ---- Searching ----
 
+    std::size_t Utf8Length(std::string_view text)
+    {
+        return std::count_if(text.begin(), text.end(), [](char c) { return !IsUtf8ContinuationByte(c); });
+    }
+
     struct SearchQuery
     {
-        std::vector<std::string> words; // lower-cased UTF-8
+        std::vector<std::string> words; // lower-cased UTF-8, distinct, longest first
         std::string phrase;             // the words joined, for exact/prefix ranking
         uint32 minQuality = 0;
         std::vector<uint32> slots;
@@ -693,45 +704,45 @@ namespace
             }
             else
             {
+                if (Utf8Length(lower) < MIN_WORD_LENGTH)
+                    return Acore::StringFormat("Search words need at least {} letters.", MIN_WORD_LENGTH);
+
                 if (!query.phrase.empty())
                     query.phrase += ' ';
                 query.phrase += lower;
-                query.words.push_back(std::move(lower));
+
+                if (std::find(query.words.begin(), query.words.end(), lower) == query.words.end())
+                {
+                    if (query.words.size() == MAX_QUERY_WORDS)
+                        return Acore::StringFormat("Use at most {} words.", MAX_QUERY_WORDS);
+                    query.words.push_back(std::move(lower));
+                }
             }
         }
 
         if (query.words.empty())
             return "Give at least one word of the item name, e.g. .finditem frost sword";
 
+        // The longest word is usually the most selective: it alone uses the index.
+        std::stable_sort(query.words.begin(), query.words.end(),
+            [](std::string const& a, std::string const& b) { return a.size() > b.size(); });
         return {};
     }
 
     std::vector<Match> FindItems(SearchQuery const& query, Player const* player, IndexView const& index)
     {
-        // Candidates for each query word, intersected smallest first.
-        std::vector<std::vector<uint32>> lists;
-        lists.reserve(query.words.size());
-        for (std::string const& word : query.words)
-        {
-            lists.push_back(index.ItemsContaining(word));
-            if (lists.back().empty())
-                return {};
-        }
-        std::sort(lists.begin(), lists.end(), [](auto const& a, auto const& b) { return a.size() < b.size(); });
-
-        std::vector<uint32> candidates = std::move(lists.front());
-        for (std::size_t i = 1; i < lists.size() && !candidates.empty(); ++i)
-        {
-            std::vector<uint32> narrowed;
-            std::set_intersection(candidates.begin(), candidates.end(), lists[i].begin(), lists[i].end(),
-                std::back_inserter(narrowed));
-            candidates = std::move(narrowed);
-        }
-
+        // One index lookup for the longest word; the other words are checked on
+        // those candidates. Every query word lies inside a single name word, so
+        // a substring test of the whole name is equivalent.
         std::vector<Match> matches;
-        for (uint32 itemIndex : candidates)
+        for (uint32 itemIndex : index.ItemsContaining(query.words.front()))
         {
             ItemRecord const& item = index.items[itemIndex];
+            std::string_view const name = index.Name(item);
+            if (!std::all_of(query.words.begin() + 1, query.words.end(),
+                [name](std::string const& word) { return name.find(word) != std::string_view::npos; }))
+                continue;
+
             if (item.quality < query.minQuality || item.itemLevel < query.minItemLevel)
                 continue;
 
@@ -746,7 +757,6 @@ namespace
                     continue;
             }
 
-            std::string_view const name = index.Name(item);
             uint8 rank = 2;
             if (name == query.phrase)
                 rank = 0;
