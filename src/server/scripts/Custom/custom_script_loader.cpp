@@ -17,10 +17,14 @@
 
 // This is where scripts' loading functions should be declared:
 // void MyExampleScript()
+void AddSC_wowvr_commandscript();
+void AddSC_wowvr_finditem_commandscript();
 
 // The name of this function should match:
 // void Add${NameOfDirectory}Scripts()
 void AddCustomScripts()
 {
     // MyExampleScript()
+    AddSC_wowvr_commandscript();
+    AddSC_wowvr_finditem_commandscript();
 }

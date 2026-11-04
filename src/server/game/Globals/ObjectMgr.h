@@ -1444,6 +1444,7 @@ public:
 
     Trainer::Trainer* GetTrainer(uint32 creatureId);
     std::vector<Trainer::Trainer const*> const& GetClassTrainers(uint8 classId) const { return _classTrainers.at(classId); }
+    std::unordered_map<uint32, Trainer::Trainer> const& GetTrainers() const { return _trainers; }
 
     [[nodiscard]] VendorItemData const* GetNpcVendorItemList(uint32 entry) const
     {
