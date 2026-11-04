@@ -34,8 +34,11 @@
  * A search touches only the matching words and items, so it needs no rate
  * limit. The file carries a fingerprint of the item data it was built from:
  * on startup it is reused when the items are unchanged and rebuilt otherwise.
- * Directory: WowVR.FindItem.CacheDir in worldserver.conf (default: the system
- * temp directory). If it cannot be written the index is kept in memory.
+ * Directory: WowVR.FindItem.CacheDir in worldserver.conf (default:
+ * <DataDir>/wowvr-finditem-cache). It must be owned by the server user and not
+ * writable by group or others, and index files must be regular files owned by
+ * the server user (symlinks are refused), so other local users cannot plant or
+ * redirect them. If that is not the case, the index is kept in memory.
  */
 
 #include "Chat.h"
@@ -44,10 +47,12 @@
 #include "Log.h"
 #include "ObjectMgr.h"
 #include "Player.h"
+#include "Random.h"
 #include "StringConvert.h"
 #include "StringFormat.h"
 #include "Tokenize.h"
 #include "Util.h"
+#include "World.h"
 #include "WorldScript.h"
 #include <boost/interprocess/file_mapping.hpp>
 #include <boost/interprocess/mapped_region.hpp>
@@ -61,6 +66,12 @@
 #include <memory>
 #include <mutex>
 #include <unordered_map>
+
+#if AC_PLATFORM != AC_PLATFORM_WINDOWS
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 using namespace Acore::ChatCommands;
 
@@ -439,6 +450,74 @@ namespace
 
     // ---- Loading: memory-mapped file, or an in-memory blob as fallback ----
 
+    // A cache entry is trusted only if it is not a symlink, has the expected
+    // type and belongs to the server user; a directory must also not be
+    // writable by anyone else, so nobody can swap files inside it.
+    bool IsTrustedEntry(std::filesystem::path const& path, bool directory)
+    {
+#if AC_PLATFORM != AC_PLATFORM_WINDOWS
+        struct stat st;
+        if (lstat(path.c_str(), &st) != 0)
+            return false;
+
+        if (directory ? !S_ISDIR(st.st_mode) : !S_ISREG(st.st_mode))
+            return false;
+
+        if (st.st_uid != geteuid())
+            return false;
+
+        return !directory || !(st.st_mode & (S_IWGRP | S_IWOTH));
+#else
+        std::error_code error;
+        std::filesystem::file_status const status = std::filesystem::symlink_status(path, error);
+        if (error || std::filesystem::is_symlink(status))
+            return false;
+
+        return directory ? std::filesystem::is_directory(status) : std::filesystem::is_regular_file(status);
+#endif
+    }
+
+    bool PrepareCacheDirectory(std::filesystem::path const& dir)
+    {
+        std::error_code error;
+        if (std::filesystem::create_directories(dir, error))
+            std::filesystem::permissions(dir, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace,
+                error);
+
+        return IsTrustedEntry(dir, true);
+    }
+
+    // Creates `path` exclusively (never following or reusing an existing entry)
+    // with owner-only permissions, and writes `blob` to it.
+    bool WriteNewFile(std::filesystem::path const& path, std::vector<char> const& blob)
+    {
+#if AC_PLATFORM != AC_PLATFORM_WINDOWS
+        int const fd = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+        if (fd < 0)
+            return false;
+
+        std::size_t written = 0;
+        while (written < blob.size())
+        {
+            ssize_t const n = write(fd, blob.data() + written, blob.size() - written);
+            if (n <= 0)
+            {
+                close(fd);
+                return false;
+            }
+            written += std::size_t(n);
+        }
+        return close(fd) == 0;
+#else
+        std::error_code error;
+        if (std::filesystem::exists(std::filesystem::symlink_status(path, error)))
+            return false;
+
+        std::ofstream out(path, std::ios::binary);
+        return bool(out.write(blob.data(), std::streamsize(blob.size())));
+#endif
+    }
+
     class LocaleIndex
     {
     public:
@@ -449,8 +528,9 @@ namespace
             std::vector<SearchableItem> const source = CollectItems(localeIndex);
             uint64 const fingerprint = Fingerprint(source, localeIndex);
             std::filesystem::path const path = cacheDir / Acore::StringFormat("finditem-{}.idx", localeIndex);
+            bool const cacheUsable = PrepareCacheDirectory(cacheDir);
 
-            if (MapFile(path) && _view.header->fingerprint == fingerprint
+            if (cacheUsable && MapFile(path) && _view.header->fingerprint == fingerprint
                 && _view.header->locale == uint32(localeIndex))
             {
                 LOG_INFO("server.loading", ">> .finditem: using cached index {} ({} items)", path.string(),
@@ -460,15 +540,15 @@ namespace
             _region.reset();
 
             std::vector<char> blob = BuildIndex(source, localeIndex, fingerprint);
-            if (WriteFile(path, blob) && MapFile(path))
+            if (cacheUsable && WriteFile(path, blob) && MapFile(path))
             {
                 LOG_INFO("server.loading", ">> .finditem: built index {} ({} items)", path.string(),
                     _view.header->itemCount);
                 return;
             }
 
-            LOG_WARN("server.loading", ">> .finditem: cannot use cache directory {}; keeping the index in memory",
-                cacheDir.string());
+            LOG_WARN("server.loading", ">> .finditem: cache directory {} is not writable or not owned by the server "
+                "user (or is writable by others); keeping the index in memory", cacheDir.string());
             _region.reset();
             _memory = std::move(blob);
             _view.Attach(_memory.data(), _memory.size());
@@ -480,7 +560,7 @@ namespace
             namespace bip = boost::interprocess;
             try
             {
-                if (!std::filesystem::is_regular_file(path))
+                if (!IsTrustedEntry(path, false))
                     return false;
 
                 bip::file_mapping file(path.string().c_str(), bip::read_only);
@@ -494,20 +574,17 @@ namespace
             }
         }
 
-        // Writes to a temporary file and renames it, so readers never see a
-        // partial index.
+        // Writes to a fresh, uniquely named temporary file and renames it over
+        // the index, so readers never see a partial index. rename() replaces the
+        // directory entry itself and never follows a symlink at `path`.
         static bool WriteFile(std::filesystem::path const& path, std::vector<char> const& blob)
         {
+            std::filesystem::path const tmp = Acore::StringFormat("{}.{:08x}{:08x}.tmp", path.string(),
+                urand(0, 0xFFFFFFFF), urand(0, 0xFFFFFFFF));
+            if (!WriteNewFile(tmp, blob))
+                return false;
+
             std::error_code error;
-            std::filesystem::create_directories(path.parent_path(), error);
-
-            std::filesystem::path const tmp = path.string() + ".tmp";
-            {
-                std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
-                if (!out.write(blob.data(), std::streamsize(blob.size())))
-                    return false;
-            }
-
             std::filesystem::rename(tmp, path, error);
             if (error)
             {
@@ -528,9 +605,8 @@ namespace
         if (!configured.empty())
             return configured;
 
-        std::error_code error;
-        std::filesystem::path const temp = std::filesystem::temp_directory_path(error);
-        return (error ? std::filesystem::path(".") : temp) / "wowvr-finditem";
+        // Never a shared temp directory: other local users could plant files there.
+        return std::filesystem::path(sWorld->GetDataPath()) / "wowvr-finditem-cache";
     }
 
     IndexView const& IndexForLocale(int localeIndex)
