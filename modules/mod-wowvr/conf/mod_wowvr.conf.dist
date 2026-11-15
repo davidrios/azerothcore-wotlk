@@ -1,0 +1,56 @@
+[worldserver]
+
+###################################################################################################
+# MOD-WOWVR
+#
+# Relays WowVR clients' VR poses (head, hands, fingers, lean, pointer, full body tracker
+# joints) to the players who can see them. Needs the core patch that adds opcodes
+# 0x521-0x526. Stock 3.3.5a clients are unaffected.
+# Protocol: docs/vr-multiplayer-protocol.md in the WowVR repository.
+###################################################################################################
+
+#
+#    WowVR.Enable
+#        Description: Announce the protocol on login and relay poses. When off, no announcement is
+#                     sent and CMSG_WOWVR_* packets are dropped.
+#        Default:     1 - (Enabled)
+#                     0 - (Disabled)
+
+WowVR.Enable = 1
+
+#
+#    WowVR.SendRate
+#        Description: Poses a second the server sends out per VR player, at most (1-1000).
+#        Default:     20
+
+WowVR.SendRate = 20
+
+#
+#    WowVR.MaxReceiveRate
+#        Description: Poses a second a client may send (1-1000); more are dropped.
+#        Default:     40
+
+WowVR.MaxReceiveRate = 40
+
+#
+#    WowVR.PoseRange
+#        Description: Yards. Players further than this from a VR player don't get its poses.
+#        Default:     60
+
+WowVR.PoseRange = 60
+
+#
+#    WowVR.PoseTimeoutMs
+#        Description: Milliseconds. A pose older than this isn't sent to players who come into view
+#                     (1-65535).
+#        Default:     2000
+
+WowVR.PoseTimeoutMs = 2000
+
+#
+#    WowVR.MaxOffset
+#        Description: Yards. A pose with any position (head, hands, body offset or full body joint)
+#                     further than this from the character is refused (0-32.767).
+#        Default:     8.0
+
+WowVR.MaxOffset = 8.0
