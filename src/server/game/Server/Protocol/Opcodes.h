@@ -1340,7 +1340,14 @@ enum Opcodes : uint16
     SMSG_MULTIPLE_MOVES                             = 0x51E, // uncompressed version of SMSG_COMPRESSED_MOVES
     TC9_CMSG_PREPARE_FOR_REDIRECT                   = 0x51F,
     TC9_SMSG_READY_FOR_REDIRECT                     = 0x520,
-    NUM_MSG_TYPES                                   = 0x521
+    // WowVR multiplayer protocol extension (handled by mod-wowvr); 0x527-0x52F are reserved for it
+    CMSG_WOWVR_HELLO                                = 0x521,
+    SMSG_WOWVR_HELLO                                = 0x522,
+    CMSG_WOWVR_STATE                                = 0x523,
+    SMSG_WOWVR_STATE                                = 0x524,
+    CMSG_WOWVR_POSE                                 = 0x525,
+    SMSG_WOWVR_POSE                                 = 0x526,
+    NUM_MSG_TYPES                                   = 0x530
 };
 
 enum OpcodeMisc : uint16

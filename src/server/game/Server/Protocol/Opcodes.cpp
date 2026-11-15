@@ -1441,6 +1441,13 @@ void OpcodeTable::Initialize()
     /*0x51E*/ DEFINE_SERVER_OPCODE_HANDLER(SMSG_MULTIPLE_MOVES, STATUS_NEVER);
     /*0x51F*/ DEFINE_HANDLER(TC9_CMSG_PREPARE_FOR_REDIRECT,                                         STATUS_AUTHED,     PROCESS_THREADUNSAFE,   &WorldSession::HandleTC9PrepareForRedirect);
     /*0x520*/ DEFINE_SERVER_OPCODE_HANDLER(TC9_SMSG_READY_FOR_REDIRECT, STATUS_NEVER);
+    // WowVR: handled by mod-wowvr through ServerScript::CanPacketReceive
+    /*0x521*/ DEFINE_HANDLER(CMSG_WOWVR_HELLO,                                                      STATUS_LOGGEDIN,   PROCESS_THREADUNSAFE,   &WorldSession::Handle_NULL                              );
+    /*0x522*/ DEFINE_SERVER_OPCODE_HANDLER(SMSG_WOWVR_HELLO,                                        STATUS_NEVER);
+    /*0x523*/ DEFINE_HANDLER(CMSG_WOWVR_STATE,                                                      STATUS_LOGGEDIN,   PROCESS_THREADUNSAFE,   &WorldSession::Handle_NULL                              );
+    /*0x524*/ DEFINE_SERVER_OPCODE_HANDLER(SMSG_WOWVR_STATE,                                        STATUS_NEVER);
+    /*0x525*/ DEFINE_HANDLER(CMSG_WOWVR_POSE,                                                       STATUS_LOGGEDIN,   PROCESS_THREADUNSAFE,   &WorldSession::Handle_NULL                              );
+    /*0x526*/ DEFINE_SERVER_OPCODE_HANDLER(SMSG_WOWVR_POSE,                                         STATUS_NEVER);
 
 #undef DEFINE_HANDLER
 #undef DEFINE_SERVER_OPCODE_HANDLER
