@@ -133,10 +133,12 @@ ENV PATH="/azerothcore/env/dist/bin:$PATH"
 
 # To use GID/UID 1000 in ubuntu > 23.04 the existing user must be deleted
 # See https://bugs.launchpad.net/cloud-images/+bug/2005129
+# /azerothcore/env/dist/cache is the worldserver's writable cache volume (see docker-compose.yml)
 RUN userdel --remove ubuntu \
   && addgroup --gid "$GROUP_ID" "$DOCKER_USER" \
   && adduser --disabled-password --gecos '' --uid "$USER_ID" --gid "$GROUP_ID" "$DOCKER_USER" \
   && passwd -d "$DOCKER_USER" \
+  && mkdir -p /azerothcore/env/dist/cache \
   && chown -R "$DOCKER_USER:$DOCKER_USER" /azerothcore
 
 COPY --chown=$USER_ID:$GROUP_ID \

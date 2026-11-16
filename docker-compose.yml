@@ -75,6 +75,8 @@ services:
       AC_LOGIN_DATABASE_INFO: "ac-database;3306;root;${DOCKER_DB_ROOT_PASSWORD:-password};acore_auth"
       AC_WORLD_DATABASE_INFO: "ac-database;3306;root;${DOCKER_DB_ROOT_PASSWORD:-password};acore_world"
       AC_CHARACTER_DATABASE_INFO: "ac-database;3306;root;${DOCKER_DB_ROOT_PASSWORD:-password};acore_characters"
+      # .finditem index cache; the data dir below is read-only
+      AC_WOW_VR_FIND_ITEM_CACHE_DIR: "/azerothcore/env/dist/cache/finditem"
     ports:
       - ${DOCKER_WORLD_EXTERNAL_PORT:-8085}:8085
       - ${DOCKER_SOAP_EXTERNAL_PORT:-7878}:7878
@@ -84,6 +86,7 @@ services:
       - ${DOCKER_VOL_LOGS:-./env/dist/logs}:/azerothcore/env/dist/logs:delegated
       # client data
       - ${DOCKER_VOL_DATA:-ac-client-data}:/azerothcore/env/dist/data/:ro
+      - ${DOCKER_VOL_CACHE:-ac-worldserver-cache}:/azerothcore/env/dist/cache
     depends_on:
       ac-database:
         condition: service_healthy
@@ -208,6 +211,7 @@ services:
 volumes:
   ac-database:
   ac-client-data:
+  ac-worldserver-cache:
   # Used for dev server
   ac-build-dev:
   ac-ccache-dev:
