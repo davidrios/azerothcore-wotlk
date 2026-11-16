@@ -1,0 +1,33 @@
+# Podman additions to docker-compose.yml. Docker doesn't understand them, so they live apart:
+#
+#   podman compose -f docker-compose.yml -f docker-compose.podman.yml up -d --build
+#
+# or put `COMPOSE_FILE=docker-compose.yml:docker-compose.podman.yml` in `.env` and keep using plain
+# `podman compose ...` (that checkout then no longer works with Docker).
+#
+# Rootless podman maps the image's user (uid DOCKER_USER_ID, 1000 by default) to an unprivileged
+# subordinate uid on the host, which can't write the bind-mounted ./env/dist/etc and logs folders:
+# the entrypoint's config copy then fails and every service exits. `keep-id` maps your own host user
+# to that uid instead, so the services write those folders as you.
+
+x-podman-userns: &podman-userns
+  userns_mode: "keep-id:uid=${DOCKER_USER_ID:-1000},gid=${DOCKER_GROUP_ID:-1000}"
+
+services:
+  ac-db-import:
+    <<: *podman-userns
+
+  ac-worldserver:
+    <<: *podman-userns
+
+  ac-authserver:
+    <<: *podman-userns
+
+  ac-client-data-init:
+    <<: *podman-userns
+
+  ac-tools:
+    <<: *podman-userns
+
+  ac-dev-server:
+    <<: *podman-userns

@@ -39,3 +39,22 @@ $ docker compose up -d --build
 $ docker compose attach ac-worldserver
 AC> account create admin password 3 -1
 ```
+
+## Podman
+
+Rootless podman works with the same files plus `docker-compose.podman.yml`, which maps your host
+user to the containers' user so they can write `env/dist/etc` and `env/dist/logs`:
+
+```console
+$ systemctl --user enable --now podman.socket
+$ podman compose -f docker-compose.yml -f docker-compose.podman.yml up -d --build
+$ podman compose -f docker-compose.yml -f docker-compose.podman.yml attach ac-worldserver
+```
+
+To skip the `-f` flags, add `COMPOSE_FILE=docker-compose.yml:docker-compose.podman.yml` to `.env`
+(that checkout then no longer works with Docker).
+
+- `podman compose` runs docker-compose against `podman.socket`, so both need to be installed.
+- The database's healthcheck, which the other services wait for, runs from a systemd user timer.
+  Over SSH without a desktop session, enable lingering first (`loginctl enable-linger`), or
+  `up` stops with the database reported unhealthy.
